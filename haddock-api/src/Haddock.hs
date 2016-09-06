@@ -149,12 +149,15 @@ haddockWithGhc ghc args = handleTopExceptions $ do
   shortcutFlags flags
   qual <- case qualification flags of {Left msg -> throwE msg; Right q -> return q}
 
+  {-
   -- inject dynamic-too into flags before we proceed
   flags' <- ghc flags $ do
         df <- getDynFlags
         case lookup "GHC Dynamic" (compilerInfo df) of
           Just "YES" -> return $ Flag_OptGhc "-dynamic-too" : flags
           _ -> return flags
+          -}
+  let flags' = flags
 
   unless (Flag_NoWarnings `elem` flags) $ do
     hypSrcWarnings flags
@@ -204,7 +207,10 @@ withGhc flags action = do
         printException err
         liftIO exitFailure
 
-  withGhc' libDir (ghcFlags flags) (\_ -> handleSrcErrors action)
+  let argv1 = map (mkGeneralLocated "on the commandline") (ghcFlags flags)
+  (argv2, _staticFlagWarnings) <- parseStaticFlags argv1
+
+  withGhc' libDir argv2 (\_ -> handleSrcErrors action)
 
 
 readPackagesAndProcessModules :: [Flag] -> [String]
@@ -390,7 +396,7 @@ readInterfaceFiles name_cache_accessor pairs = do
 
 -- | Start a GHC session with the -haddock flag set. Also turn off
 -- compilation and linking. Then run the given 'Ghc' action.
-withGhc' :: String -> [String] -> (DynFlags -> Ghc a) -> IO a
+withGhc' :: String -> [Located String] -> (DynFlags -> Ghc a) -> IO a
 withGhc' libDir flags ghcActs = runGhc (Just libDir) $ do
   dynflags  <- getSessionDynFlags
   dynflags' <- parseGhcFlags (gopt_set dynflags Opt_Haddock) {
@@ -418,10 +424,9 @@ withGhc' libDir flags ghcActs = runGhc (Just libDir) $ do
       --
       -- This is a bit of a hack until we get rid of the rest of the remaining
       -- StaticFlags. See GHC issue #8276.
-      let flags' = discardStaticFlags flags
-      (dynflags', rest, _) <- parseDynamicFlags dynflags (map noLoc flags')
+      (dynflags', rest, _) <- parseDynamicFlags dynflags flags
       if not (null rest)
-        then throwE ("Couldn't parse GHC options: " ++ unwords flags')
+        then throwE ("Couldn't parse GHC options")
         else return dynflags'
 
 -------------------------------------------------------------------------------
